@@ -1,0 +1,267 @@
+C51 COMPILER V9.01   MAIN                                                                  04/05/2022 19:25:34 PAGE 1   
+
+
+C51 COMPILER V9.01, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN main.OBJ
+COMPILER INVOKED BY: C:\Program Files (x86)\keil4\C51\BIN\C51.EXE main.c BROWSE DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          #include<reg52.h>
+   2          #include<intrins.h>
+   3          
+   4          //引脚定义
+   5          sbit LSA = P1^0;//三八译码器片选引脚
+   6          sbit LSB = P1^1;
+   7          sbit LSC = P1^2;
+   8          sbit IO = P1^4;//DS1302数据引脚
+   9          sbit CE = P1^5;//总开关
+  10          sbit SCLK = P1^3;//时序引脚
+  11          #define LED P2//数码管接口
+  12          //关键词定义
+  13          typedef unsigned int uint;
+  14          typedef unsigned char uchar; 
+  15          
+  16          //函数声明
+  17          void writeinit();//初始化（开关写保护）
+  18          void writetime(uchar waddr,uchar wdat);//写初始时间
+  19          void timestorage();     //将时间存储至数组Time
+  20          uchar readtime(uchar raddr);//读取时间
+  21          void light();//数码管驱动
+  22          void delay(uchar i);//延迟
+  23          
+  24          
+  25          uchar code WriteAddr[8] = {0x80,0x82,0x84,0x86,0x88,0x8a,0x8c,0x8e};//写入初始化地址
+  26          uchar code InitTime[8] = {0x00,0x25,0x19,0x00,0x00,0x00,0x00,0x00};//写入初始化时间
+  27          //设定时间为：          秒   分   时   日   月   周      年 
+  28          uchar ReadAddr[8] = {0x81,0x83,0x85,0x87,0x89,0x8b,0x8d,0x8f};//写入读取时间地址
+  29          uchar Time[8];//读取的时间
+  30          uint BCDcode[16];//数码管对应的时间代码
+  31          //uint code LEDplay[16] = {0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f};//从0到9对应的数码管代码
+  32          uint code LEDplay[16] = {0xfc,0x60,0xda,0xf2,0x66,0xb6,0xbe,0xe0,0xfe,0xf6};
+  33          
+  34          /********************************************************************************
+  35          *函数名：delay
+  36          *功能：延迟
+  37          *输入：延迟的时间长度
+  38          *输出：
+  39          ********************************************************************************/
+  40          void delay(uchar i){
+  41   1              while(i){
+  42   2                      i--;
+  43   2              }
+  44   1      }
+  45          
+  46          /********************************************************************************
+  47          *函数名：writeinit
+  48          *功能：初始化（开关写保护并调用writetime函数逐位写入时间数据）
+  49          *输入：
+  50          *输出：
+  51          ********************************************************************************/
+  52          void writeinit(){
+  53   1              uchar i;
+  54   1              writetime(WriteAddr[8],InitTime[8]);//开写保护地址0x8e数据0x00 
+  55   1              for(i=0;i<=6;i++){
+C51 COMPILER V9.01   MAIN                                                                  04/05/2022 19:25:34 PAGE 2   
+
+  56   2                      writetime(WriteAddr[i],InitTime[i]);//写入初始时间
+  57   2              }
+  58   1              writetime(WriteAddr[8],InitTime[8]);//关写保护地址0x8e数据0x00 
+  59   1      }
+  60          
+  61          /********************************************************************************
+  62          *函数名：
+  63          *功能：写入一位(BCD)初始时间数据
+  64          *输入：addr,dat
+  65          *输出：
+  66          ********************************************************************************/ 
+  67          void writetime(uchar addr,uchar dat){
+  68   1              uchar a;
+  69   1              CE = 0;//关闭总开关
+  70   1              _nop_();
+  71   1              SCLK = 0;//时序置低电平
+  72   1              _nop_();
+  73   1              CE = 1;//打开总开关
+  74   1              _nop_();
+  75   1      
+  76   1              for(a=0;a<=7;a++){//写地址 
+  77   2                      IO = addr & 0x01;//传入一位地址
+  78   2                      addr >>= 1;//地址右移准备传递下一位
+  79   2                      SCLK = 1;//时序上升沿触发
+  80   2                      _nop_();
+  81   2                      SCLK = 0;//时序置低电平
+  82   2                      _nop_();
+  83   2              }               
+  84   1              for(a=0;a<=7;a++){//写数据 
+  85   2                      IO = dat & 0x01;//传入一位数据
+  86   2                      dat >>= 1;//数据右移准备传递下一位
+  87   2                      SCLK = 1;//时序上升沿触发
+  88   2                      _nop_();
+  89   2                      SCLK = 0;//时序置低电平
+  90   2                      _nop_();
+  91   2              }
+  92   1              CE = 0;//关闭总开关
+  93   1              _nop_();
+  94   1      }
+  95          
+  96          /********************************************************************************
+  97          *函数名：timestorage
+  98          *功能：逐位读取时间数据，将个位和十位一起存储的数据改为逐一存储并改为数码管对应代码
+  99          *输入：
+ 100          *输出：
+ 101          ********************************************************************************/
+ 102          void timestorage(){
+ 103   1              uchar i;
+ 104   1              for(i=0;i<=7;i++){ //调用读取时间函数7次并将时间数据存入Time数组
+ 105   2                      Time[i] = readtime(ReadAddr[i]);        
+ 106   2              }       //将个位和十位一起存储的数据改为逐一存储并改为数码管对应代码
+ 107   1              /*适配硬件bug临时注释
+ 108   1              BCDcode[0] = LEDplay[Time[0]&0x0f];
+ 109   1              Time[0] = Time[0] >> 4; 
+ 110   1              BCDcode[1] = LEDplay[Time[0]];                          //秒
+ 111   1              BCDcode[2] = 0x02;                                                              //-
+ 112   1              BCDcode[3] = LEDplay[Time[1]&0x0f];     
+ 113   1              Time[1] = Time[1] >> 4; 
+ 114   1              BCDcode[4] = LEDplay[Time[1]];                          //分
+ 115   1              BCDcode[5] = 0x02;                                                              //-
+ 116   1              BCDcode[6] = LEDplay[Time[2]&0x0f];     
+ 117   1              Time[2] = Time[2] >> 4; 
+C51 COMPILER V9.01   MAIN                                                                  04/05/2022 19:25:34 PAGE 3   
+
+ 118   1              BCDcode[7] = LEDplay[Time[2]];                          //时
+ 119   1              */
+ 120   1              BCDcode[4] = LEDplay[Time[0]&0x0f];
+ 121   1              Time[0] = Time[0] >> 4; 
+ 122   1              BCDcode[5] = LEDplay[Time[0]];                          //秒
+ 123   1              BCDcode[6] = 0x02;                                                              //-
+ 124   1              BCDcode[7] = LEDplay[Time[1]&0x0f];     
+ 125   1              Time[1] = Time[1] >> 4; 
+ 126   1              BCDcode[2] = LEDplay[Time[1]];                          //分
+ 127   1              BCDcode[3] = 0x02;                                                              //-
+ 128   1              BCDcode[0] = LEDplay[Time[2]&0x0f];     
+ 129   1              Time[2] = Time[2] >> 4; 
+ 130   1              BCDcode[1] = LEDplay[Time[2]];                          //时
+ 131   1                               
+ 132   1      } 
+ 133          
+ 134          /********************************************************************************
+ 135          *函数名：readtime
+ 136          *功能：读取一位(BCD)时间数据
+ 137          *输入：addr
+ 138          *输出：dat
+ 139          ********************************************************************************/
+ 140          //将时间存储至数组Time函数
+ 141          uchar readtime(uchar addr){
+ 142   1              uchar a,d;
+ 143   1              uchar dat,newdat;
+ 144   1              dat = 0x00;//初始数据归0
+ 145   1              CE = 0;//关闭总开关
+ 146   1              _nop_();
+ 147   1              SCLK = 0;//时序置低电平
+ 148   1              _nop_();
+ 149   1              CE = 1;//打开总开关
+ 150   1              _nop_();
+ 151   1              
+ 152   1              for(a=0;a<=7;a++){//写地址 
+ 153   2                      IO = addr & 0x01;//传入一位地址
+ 154   2                      addr >>= 1;//地址右移准备传递下一位
+ 155   2                      SCLK = 1;//时序上升沿触发
+ 156   2                      _nop_();
+ 157   2                      SCLK = 0;//时序置低电平
+ 158   2                      _nop_();
+ 159   2              }
+ 160   1              for(d=0;d<=7;d++){//写时间
+ 161   2                      newdat = IO;//读取一位
+ 162   2                      dat = (dat>>1) | (newdat<<7);//将读取到的一位数据与之前的数据合并
+ 163   2                      SCLK = 1;//时序上升沿触发
+ 164   2                      _nop_();
+ 165   2                      SCLK = 0;//时序置低电平
+ 166   2                      _nop_();        
+ 167   2              }
+ 168   1              CE = 0;//时序置低电平
+ 169   1              _nop_();
+ 170   1              SCLK = 1;//时序上升沿触发
+ 171   1              _nop_();
+ 172   1              //延迟复位
+ 173   1              IO = 0;
+ 174   1              _nop_();
+ 175   1              IO = 1;
+ 176   1              _nop_();
+ 177   1              return dat;//返回读取到的时间
+ 178   1      }
+ 179          
+C51 COMPILER V9.01   MAIN                                                                  04/05/2022 19:25:34 PAGE 4   
+
+ 180          /********************************************************************************
+ 181          *函数名：light
+ 182          *功能：驱动数码管显示数据
+ 183          *输入：
+ 184          *输出：
+ 185          ********************************************************************************/
+ 186          void light(){
+ 187   1              uchar i;
+ 188   1              for(i=0;i<=7;i++){
+ 189   2                      switch (i) {
+ 190   3                              case 0://LED1(最右边的灯) 
+ 191   3                                      LSA=0;LSB=0;LSC=0;
+ 192   3                                      break;  
+ 193   3                              case 1://LED2
+ 194   3                                      LSA=1;LSB=0;LSC=0;
+ 195   3                                      break;  
+ 196   3                              case 2://LED3
+ 197   3                                      LSA=0;LSB=1;LSC=0;
+ 198   3                                      break;
+ 199   3                              case 3://LED4
+ 200   3                                      LSA=1;LSB=1;LSC=0;
+ 201   3                                      break;
+ 202   3                              case 4://LED5
+ 203   3                                      LSA=0;LSB=0;LSC=1;
+ 204   3                                      break;
+ 205   3                              case 5://LED6
+ 206   3                                      LSA=1;LSB=0;LSC=1;
+ 207   3                                      break;    
+ 208   3                              case 6://LED7
+ 209   3                                      LSA=0;LSB=1;LSC=1;
+ 210   3                                      break; 
+ 211   3                              case 7://LED8(最左边的灯)
+ 212   3                                      LSA=1;LSB=1;LSC=1;
+ 213   3                                      break; 
+ 214   3                      }
+ 215   2                      LED = BCDcode[i];
+ 216   2                      delay(100);
+ 217   2                      LED = 0x00;
+ 218   2              }
+ 219   1      }
+ 220          
+ 221          /********************************************************************************
+ 222          *函数名：main
+ 223          *功能：
+ 224          *输入：
+ 225          *输出：
+ 226          ********************************************************************************/
+ 227          void main(){    
+ 228   1              writeinit();
+ 229   1              while(1){
+ 230   2                      timestorage();
+ 231   2                      light();
+ 232   2              }
+ 233   1      }
+ 234          
+ 235          
+ 236          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    509    ----
+   CONSTANT SIZE    =     48    ----
+C51 COMPILER V9.01   MAIN                                                                  04/05/2022 19:25:34 PAGE 5   
+
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     48       2
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
